@@ -21,6 +21,7 @@ Isometrisches Action-RPG im Browser (Victor-Vran-Stil): Echtzeitkampf, Ausweiche
 
 ## Steuerung
 
+Desktop:
 - **WASD / Pfeile** bewegen
 - **Linksklick** angreifen
 - **Shift / Rechtsklick** ausweichen
@@ -28,6 +29,13 @@ Isometrisches Action-RPG im Browser (Victor-Vran-Stil): Echtzeitkampf, Ausweiche
 - **F** Overdrive (volle Leiste)
 - **Leertaste** Sprung (Puma)
 - **Esc** Pause
+
+Handy / Tablet:
+- **Stick links** bewegen (Bildschirmrichtung)
+- **Angriff** halten (zielt automatisch auf die nächste Bestie)
+- **Dash / Skill / Ult / Sprung** rechts
+- **II** Pause
+- Die Welt skaliert sich an Hoch- und Querformat sowie unterschiedliche Displaygrößen.
 
 Stirbst du, wachst du am letzten Speicherpunkt auf (alle 5 Level), nicht am Spielanfang.
 

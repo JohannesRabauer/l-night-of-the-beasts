@@ -39,8 +39,12 @@
   };
 
   let W = innerWidth, H = innerHeight;
+  let worldScale = 1, TILE_X = 36, TILE_Y = 18, TILE_Z = 22;
   const keys = {};
-  const mouse = { x: 0, y: 0, down: false, right: false };
+  const mouse = { x: 0, y: 0, down: false, right: false, fromCanvas: false };
+  const stick = { active: false, id: null, x: 0, y: 0 };
+  let attackHeld = false;
+  let useTouch = matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
   let state = "menu";
   let selected = null;
   let level = 1;
@@ -76,7 +80,16 @@
     dash: document.getElementById("dash-chip"),
     ult: document.getElementById("ult-chip"),
     deadText: document.getElementById("dead-text"),
-    cards: [...document.querySelectorAll(".character-card")]
+    cards: [...document.querySelectorAll(".character-card")],
+    touch: document.getElementById("touch"),
+    stick: document.getElementById("stick"),
+    knob: document.getElementById("stick-knob"),
+    btnAtk: document.getElementById("btn-atk"),
+    btnDash: document.getElementById("btn-dash"),
+    btnSkill: document.getElementById("btn-skill"),
+    btnUlt: document.getElementById("btn-ult"),
+    btnJump: document.getElementById("btn-jump"),
+    pauseBtn: document.getElementById("pause-btn")
   };
 
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
@@ -95,27 +108,71 @@
     };
   }
 
+  function viewportSize() {
+    const vv = window.visualViewport;
+    if (vv) return { w: vv.width, h: vv.height, x: vv.offsetLeft || 0, y: vv.offsetTop || 0 };
+    return { w: innerWidth, h: innerHeight, x: 0, y: 0 };
+  }
+
+  function updateWorldScale() {
+    const portrait = H > W;
+    const shortest = Math.min(W, H);
+    const target = portrait ? shortest / 430 : shortest / 640;
+    worldScale = clamp(target, 0.55, 1.65);
+    TILE_X = 36 * worldScale;
+    TILE_Y = 18 * worldScale;
+    TILE_Z = 22 * worldScale;
+  }
+
   function resize() {
-    const dpr = Math.min(devicePixelRatio || 1, 2);
-    W = innerWidth; H = innerHeight;
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
+    const vv = viewportSize();
+    W = Math.max(1, vv.w);
+    H = Math.max(1, vv.h);
+    const mobile = useTouch || W < 900;
+    const dpr = Math.min(devicePixelRatio || 1, mobile ? 1.75 : 2);
+    canvas.width = Math.floor(W * dpr);
+    canvas.height = Math.floor(H * dpr);
     canvas.style.width = W + "px";
     canvas.style.height = H + "px";
+    canvas.style.transform = vv.x || vv.y ? `translate(${vv.x}px, ${vv.y}px)` : "";
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    updateWorldScale();
   }
 
   function toScreen(x, y, z = 0) {
     return {
-      x: (x - y) * 36 - camera.x + W / 2,
-      y: (x + y) * 18 - z * 22 - camera.y + H / 2 + 40
+      x: (x - y) * TILE_X - camera.x + W / 2,
+      y: (x + y) * TILE_Y - z * TILE_Z - camera.y + H / 2 + 40 * worldScale
     };
   }
 
   function toWorld(sx, sy) {
     const rx = sx + camera.x - W / 2;
-    const ry = sy + camera.y - H / 2 - 40;
-    return { x: rx / 72 + ry / 36, y: ry / 36 - rx / 72 };
+    const ry = sy + camera.y - H / 2 - 40 * worldScale;
+    return { x: rx / (2 * TILE_X) + ry / (2 * TILE_Y), y: ry / (2 * TILE_Y) - rx / (2 * TILE_X) };
+  }
+
+  function aimWorld() {
+    if (attackHeld || (useTouch && !mouse.fromCanvas)) {
+      let best = null, bestD = 1e9;
+      for (const e of enemies) {
+        if (e.hp <= 0) continue;
+        const d = dist(player, e);
+        if (d < bestD) { bestD = d; best = e; }
+      }
+      if (best) return { x: best.x, y: best.y };
+      return { x: player.x + Math.cos(player.facing), y: player.y + Math.sin(player.facing) };
+    }
+    return toWorld(mouse.x, mouse.y);
+  }
+
+  function isoFromScreenStick(sx, sy) {
+    const mag = clamp(Math.hypot(sx, sy), 0, 1);
+    if (mag < 0.12) return { x: 0, y: 0, mag: 0 };
+    const vx = sx * 0.5 + sy * 0.5;
+    const vy = -sx * 0.5 + sy * 0.5;
+    const len = Math.hypot(vx, vy) || 1;
+    return { x: (vx / len) * mag, y: (vy / len) * mag, mag };
   }
 
   function save() {
@@ -289,8 +346,8 @@
     player.y = size - 3.2;
     player.z = 0;
     player.invuln = 0.6;
-    camera.x = (player.x - player.y) * 36;
-    camera.y = (player.x + player.y) * 18;
+    camera.x = (player.x - player.y) * TILE_X;
+    camera.y = (player.x + player.y) * TILE_Y;
     camera.shake = 0;
     refreshPlayerCombat();
     player.hp = player.maxHp;
@@ -392,6 +449,8 @@
   }
 
   function die() {
+    attackHeld = false;
+    resetStick();
     state = "dead";
     els.deadText.textContent = `Speicherpunkt: Level ${checkpoint} · ${getArea(checkpoint).name}`;
     els.dead.classList.remove("hidden");
@@ -437,7 +496,7 @@
   function playerAttack() {
     if (player.atkCd > 0 || player.hp <= 0) return;
     player.atkCd = player.key === "youth" ? 0.28 : 0.38;
-    const aim = toWorld(mouse.x, mouse.y);
+    const aim = aimWorld();
     player.facing = ang(player, aim);
     if (player.key === "youth") {
       shoot(player, player.facing, 11, player.atk, "#7ec8ff", false, 0.7, 0.1);
@@ -459,7 +518,7 @@
   function playerSkill() {
     if (player.skillCd > 0 || player.hp <= 0) return;
     player.skillCd = 5.5;
-    const aim = toWorld(mouse.x, mouse.y);
+    const aim = aimWorld();
     player.facing = ang(player, aim);
     if (player.key === "youth") {
       const power = level >= 41 ? 2.2 : level >= 21 ? 1.6 : 1;
@@ -528,10 +587,11 @@
     player.dashCd = 0.85;
     player.dashT = 0.18;
     player.invuln = Math.max(player.invuln, 0.18);
-    const aim = toWorld(mouse.x, mouse.y);
+    const aim = aimWorld();
     let a = player.facing;
-    const mx = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0);
-    const my = (keys.s || keys.arrowdown ? 1 : 0) - (keys.w || keys.arrowup ? 1 : 0);
+    const iso = isoFromScreenStick(stick.x, stick.y);
+    const mx = iso.mag ? iso.x : (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0);
+    const my = iso.mag ? iso.y : (keys.s || keys.arrowdown ? 1 : 0) - (keys.w || keys.arrowup ? 1 : 0);
     if (mx || my) a = Math.atan2(my, mx);
     else if (dist(player, aim) > 0.2) a = ang(player, aim);
     player.dashA = a;
@@ -563,8 +623,9 @@
       const sp = (player.key === "puma" ? 18 : 14) * dt;
       tryMove(player, player.x + Math.cos(player.dashA) * sp, player.y + Math.sin(player.dashA) * sp, player.z > 0.15);
     } else {
-      let mx = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0);
-      let my = (keys.s || keys.arrowdown ? 1 : 0) - (keys.w || keys.arrowup ? 1 : 0);
+      const iso = isoFromScreenStick(stick.x, stick.y);
+      let mx = iso.mag ? iso.x : (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0);
+      let my = iso.mag ? iso.y : (keys.s || keys.arrowdown ? 1 : 0) - (keys.w || keys.arrowup ? 1 : 0);
       const len = Math.hypot(mx, my) || 1;
       mx /= len; my /= len;
       const sp = player.speed * dt * (player.key === "puma" && player.z > 0.2 ? 1.15 : 1);
@@ -574,7 +635,7 @@
       }
     }
 
-    if (mouse.down) playerAttack();
+    if (mouse.down || attackHeld) playerAttack();
     if (portal && dist(player, portal) < 0.85) nextLevel();
   }
 
@@ -708,27 +769,28 @@
         const t = map.tiles[y][x];
         const p = toScreen(x + 0.5, y + 0.5);
         const col = (x + y) % 2 === 0 ? map.area.floor[0] : map.area.floor[1];
-        drawDiamond(p.x, p.y, 36, 18, col, "rgba(0,0,0,.25)");
+        drawDiamond(p.x, p.y, TILE_X, TILE_Y, col, "rgba(0,0,0,.25)");
         if (t === 1) {
+          const wallH = 28 * worldScale;
           ctx.beginPath();
-          ctx.moveTo(p.x - 36, p.y);
-          ctx.lineTo(p.x, p.y - 18);
-          ctx.lineTo(p.x, p.y - 46);
-          ctx.lineTo(p.x - 36, p.y - 28);
+          ctx.moveTo(p.x - TILE_X, p.y);
+          ctx.lineTo(p.x, p.y - TILE_Y);
+          ctx.lineTo(p.x, p.y - TILE_Y - wallH);
+          ctx.lineTo(p.x - TILE_X, p.y - wallH);
           ctx.closePath();
           ctx.fillStyle = map.area.wall;
           ctx.fill();
           ctx.beginPath();
-          ctx.moveTo(p.x + 36, p.y);
-          ctx.lineTo(p.x, p.y - 18);
-          ctx.lineTo(p.x, p.y - 46);
-          ctx.lineTo(p.x + 36, p.y - 28);
+          ctx.moveTo(p.x + TILE_X, p.y);
+          ctx.lineTo(p.x, p.y - TILE_Y);
+          ctx.lineTo(p.x, p.y - TILE_Y - wallH);
+          ctx.lineTo(p.x + TILE_X, p.y - wallH);
           ctx.closePath();
           ctx.fillStyle = "#00000044";
           ctx.fill();
-          drawDiamond(p.x, p.y - 28, 36, 18, map.area.accent + "55");
+          drawDiamond(p.x, p.y - wallH, TILE_X, TILE_Y, map.area.accent + "55");
         } else if (t === 2) {
-          drawDiamond(p.x, p.y - 8, 18, 9, "#5a4030", "#000");
+          drawDiamond(p.x, p.y - 8 * worldScale, TILE_X * 0.5, TILE_Y * 0.5, "#5a4030", "#000");
         }
       }
     }
@@ -738,7 +800,7 @@
     const p = toScreen(x, y);
     ctx.fillStyle = "rgba(0,0,0,.35)";
     ctx.beginPath();
-    ctx.ellipse(p.x, p.y + 6, r * 28, r * 14, 0, 0, Math.PI * 2);
+    ctx.ellipse(p.x, p.y + 6 * worldScale, r * 28 * worldScale, r * 14 * worldScale, 0, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -748,52 +810,53 @@
     const body = opts.color;
     ctx.fillStyle = body;
     ctx.beginPath();
-    ctx.ellipse(p.x, p.y - 10, ent.radius * 26, ent.radius * 34, 0, 0, Math.PI * 2);
+    const s = worldScale;
+    ctx.ellipse(p.x, p.y - 10 * s, ent.radius * 26 * s, ent.radius * 34 * s, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = "#111";
-    const fx = Math.cos(ent.facing) * 6;
-    const fy = Math.sin(ent.facing) * 3;
+    const fx = Math.cos(ent.facing) * 6 * s;
+    const fy = Math.sin(ent.facing) * 3 * s;
     ctx.beginPath();
-    ctx.arc(p.x - 4 + fx, p.y - 16 + fy, 2.2, 0, Math.PI * 2);
-    ctx.arc(p.x + 4 + fx, p.y - 16 + fy, 2.2, 0, Math.PI * 2);
+    ctx.arc(p.x - 4 * s + fx, p.y - 16 * s + fy, 2.2 * s, 0, Math.PI * 2);
+    ctx.arc(p.x + 4 * s + fx, p.y - 16 * s + fy, 2.2 * s, 0, Math.PI * 2);
     ctx.fill();
     if (opts.kind === "youth") {
       ctx.strokeStyle = "#222";
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 3 * s;
       ctx.beginPath();
-      ctx.arc(p.x, p.y - 18, 10, Math.PI * 0.15, Math.PI - 0.15);
+      ctx.arc(p.x, p.y - 18 * s, 10 * s, Math.PI * 0.15, Math.PI - 0.15);
       ctx.stroke();
       ctx.fillStyle = "#111";
-      ctx.fillRect(p.x - 14, p.y - 22, 6, 8);
-      ctx.fillRect(p.x + 8, p.y - 22, 6, 8);
+      ctx.fillRect(p.x - 14 * s, p.y - 22 * s, 6 * s, 8 * s);
+      ctx.fillRect(p.x + 8 * s, p.y - 22 * s, 6 * s, 8 * s);
     }
     if (opts.kind === "puma") {
       ctx.fillStyle = ["#8a8a8a", "#d8d0c4", "#2a3640", "#6a2020", "#e2c075"][player.helmet] || "#888";
       ctx.beginPath();
-      ctx.ellipse(p.x, p.y - 24, 11, 7, 0, 0, Math.PI * 2);
+      ctx.ellipse(p.x, p.y - 24 * s, 11 * s, 7 * s, 0, 0, Math.PI * 2);
       ctx.fill();
     }
     if (opts.kind === "werewolf") {
       ctx.fillStyle = body;
       ctx.beginPath();
-      ctx.moveTo(p.x - 10, p.y - 22);
-      ctx.lineTo(p.x - 6, p.y - 34);
-      ctx.lineTo(p.x - 2, p.y - 22);
-      ctx.moveTo(p.x + 10, p.y - 22);
-      ctx.lineTo(p.x + 6, p.y - 34);
-      ctx.lineTo(p.x + 2, p.y - 22);
+      ctx.moveTo(p.x - 10 * s, p.y - 22 * s);
+      ctx.lineTo(p.x - 6 * s, p.y - 34 * s);
+      ctx.lineTo(p.x - 2 * s, p.y - 22 * s);
+      ctx.moveTo(p.x + 10 * s, p.y - 22 * s);
+      ctx.lineTo(p.x + 6 * s, p.y - 34 * s);
+      ctx.lineTo(p.x + 2 * s, p.y - 22 * s);
       ctx.fill();
     }
     if (ent.maxHp && ent.hp < ent.maxHp) {
       ctx.fillStyle = "#200";
-      ctx.fillRect(p.x - 16, p.y - 40, 32, 4);
+      ctx.fillRect(p.x - 16 * s, p.y - 40 * s, 32 * s, 4 * s);
       ctx.fillStyle = "#c41e3a";
-      ctx.fillRect(p.x - 16, p.y - 40, 32 * (ent.hp / ent.maxHp), 4);
+      ctx.fillRect(p.x - 16 * s, p.y - 40 * s, 32 * s * (ent.hp / ent.maxHp), 4 * s);
     }
     if (ent.telegraph > 0) {
       ctx.strokeStyle = "rgba(255,60,60,.7)";
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 22, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, 22 * s, 0, Math.PI * 2);
       ctx.stroke();
     }
   }
@@ -803,7 +866,7 @@
     const p = toScreen(player.x, player.y);
     ctx.strokeStyle = "rgba(126,200,255,.25)";
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 40 + (performance.now() / 8 % 80), 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, (40 + (performance.now() / 8 % 80)) * worldScale, 0, Math.PI * 2);
     ctx.stroke();
     for (const e of enemies) {
       const s = toScreen(e.x, e.y);
@@ -817,8 +880,8 @@
     ctx.fillRect(0, 0, W, H);
     if (!map || !player) return;
 
-    camera.x = lerp(camera.x, (player.x - player.y) * 36 + (Math.random() - 0.5) * camera.shake, 0.12);
-    camera.y = lerp(camera.y, (player.x + player.y) * 18 + (Math.random() - 0.5) * camera.shake, 0.12);
+    camera.x = lerp(camera.x, (player.x - player.y) * TILE_X + (Math.random() - 0.5) * camera.shake, 0.12);
+    camera.y = lerp(camera.y, (player.x + player.y) * TILE_Y + (Math.random() - 0.5) * camera.shake, 0.12);
     camera.shake *= 0.88;
     const pc = toScreen(player.x, player.y);
 
@@ -826,7 +889,7 @@
 
     if (portal) {
       const p = toScreen(portal.x, portal.y, 0.2);
-      const pulse = 16 + Math.sin(performance.now() / 180) * 5;
+      const pulse = (16 + Math.sin(performance.now() / 180) * 5) * worldScale;
       ctx.fillStyle = "#e2c07555";
       ctx.beginPath();
       ctx.ellipse(p.x, p.y, pulse, pulse * 0.5, 0, 0, Math.PI * 2);
@@ -849,21 +912,21 @@
       const s = toScreen(p.x, p.y, p.z);
       ctx.fillStyle = p.color;
       ctx.beginPath();
-      ctx.arc(s.x, s.y, 5, 0, Math.PI * 2);
+      ctx.arc(s.x, s.y, 5 * worldScale, 0, Math.PI * 2);
       ctx.fill();
     }
     for (const p of particles) {
       const s = toScreen(p.x, p.y, Math.max(0, p.z));
       ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
       ctx.fillStyle = p.color;
-      ctx.fillRect(s.x, s.y, p.size, p.size);
+      ctx.fillRect(s.x, s.y, p.size * worldScale, p.size * worldScale);
       ctx.globalAlpha = 1;
     }
     for (const f of floats) {
       const s = toScreen(f.x, f.y, f.z);
       ctx.globalAlpha = clamp(f.life / 0.8, 0, 1);
       ctx.fillStyle = f.color;
-      ctx.font = "700 14px Source Sans 3, sans-serif";
+      ctx.font = `700 ${Math.round(14 * worldScale)}px Source Sans 3, sans-serif`;
       ctx.fillText(f.text, s.x - 10, s.y);
       ctx.globalAlpha = 1;
     }
@@ -872,7 +935,7 @@
 
     const vis = visionRange();
     if (vis < 90) {
-      const g = ctx.createRadialGradient(pc.x, pc.y, vis * 12, pc.x, pc.y, vis * 28);
+      const g = ctx.createRadialGradient(pc.x, pc.y, vis * 12 * worldScale, pc.x, pc.y, vis * 28 * worldScale);
       g.addColorStop(0, "rgba(8,12,16,0)");
       g.addColorStop(1, "rgba(8,12,16,0.82)");
       ctx.fillStyle = g;
@@ -884,9 +947,10 @@
 
     ctx.fillStyle = "#e2c075";
     ctx.font = "12px Source Sans 3, sans-serif";
-    ctx.fillText(`${enemies.length} Bestien`, 16, H - 28);
-    if (player.key === "puma") ctx.fillText(HELMETS[player.helmet] + (player.armor ? " · Dämonenrüstung" : ""), 16, H - 12);
-    if (player.key === "werewolf") ctx.fillText(WOLF_TITLES[zoneOf(level)] + (canLifesteal() ? " · Lebenskraft" : " · noch kein Raub"), 16, H - 12);
+    const infoY = useTouch ? 72 : H - 28;
+    ctx.fillText(`${enemies.length} Bestien`, 16, infoY);
+    if (player.key === "puma") ctx.fillText(HELMETS[player.helmet] + (player.armor ? " · Dämonenrüstung" : ""), 16, infoY + 16);
+    if (player.key === "werewolf") ctx.fillText(WOLF_TITLES[zoneOf(level)] + (canLifesteal() ? " · Lebenskraft" : " · noch kein Raub"), 16, infoY + 16);
   }
 
   function updateHud() {
@@ -904,12 +968,22 @@
     els.dash.className = "skill" + (player.dashCd > 0 ? " cd" : " ready");
     els.ult.textContent = player.overdrive >= 100 ? "F Overdrive BEREIT" : `F Overdrive ${Math.floor(player.overdrive)}%`;
     els.ult.className = "skill" + (player.overdrive >= 100 ? " ready" : " cd");
+    els.btnSkill.textContent = player.skillCd > 0 ? skillName().slice(0, 6) : "Skill";
+    els.btnUlt.textContent = player.overdrive >= 100 ? "Ult" : `${Math.floor(player.overdrive)}%`;
+    els.btnDash.classList.toggle("gold", player.dashCd <= 0);
+    els.btnJump.classList.toggle("hidden", player.key !== "puma");
   }
 
   function showPlayUi(on) {
     els.hud.classList.toggle("hidden", !on);
     els.hint.classList.toggle("hidden", !on);
     els.menu.classList.toggle("hidden", on);
+    const touchOn = on && (useTouch || W < 900);
+    els.touch.classList.toggle("hidden", !touchOn);
+    els.touch.classList.toggle("desktop-hide", !useTouch && W >= 900);
+    els.hint.textContent = touchOn
+      ? "Stick bewegen · Angriff halten · Dash / Skill / Ult rechts · Pause oben"
+      : "WASD bewegen · Klick Angriff · Shift ausweichen · Q Fähigkeit · F Overdrive · Leertaste Sprung (Puma)";
   }
 
   function startRun(fromSave, key) {
@@ -946,7 +1020,7 @@
       updateFx(dt);
       hintTimer -= dt;
       if (hintTimer <= 0) els.hint.classList.add("hidden");
-      if (now % 8 < 1) updateHud();
+      updateHud();
     }
     drawScene();
     requestAnimationFrame(loop);
@@ -982,15 +1056,85 @@
     refreshContinue();
   });
 
-  addEventListener("keydown", e => {
-    keys[e.key.toLowerCase()] = true;
-    if (e.key === "Escape" && state === "play") {
+  function togglePause() {
+    if (state === "play") {
+      attackHeld = false;
+      resetStick();
       state = "pause";
       els.pause.classList.remove("hidden");
-    } else if (e.key === "Escape" && state === "pause") {
+    } else if (state === "pause") {
       state = "play";
       els.pause.classList.add("hidden");
     }
+  }
+
+  function clientPoint(e) {
+    const vv = window.visualViewport;
+    return {
+      x: e.clientX - (vv ? vv.offsetLeft : 0),
+      y: e.clientY - (vv ? vv.offsetTop : 0)
+    };
+  }
+
+  function setStickFromEvent(e) {
+    const rect = els.stick.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const nx = (e.clientX - cx) / (rect.width * 0.42);
+    const ny = (e.clientY - cy) / (rect.height * 0.42);
+    const mag = Math.hypot(nx, ny);
+    const cap = mag > 1 ? 1 / mag : 1;
+    stick.x = nx * cap;
+    stick.y = ny * cap;
+    els.knob.style.transform = `translate(calc(-50% + ${stick.x * 36}%), calc(-50% + ${stick.y * 36}%))`;
+  }
+
+  function resetStick() {
+    stick.active = false;
+    stick.id = null;
+    stick.x = 0;
+    stick.y = 0;
+    els.knob.style.transform = "translate(-50%, -50%)";
+  }
+
+  els.stick.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    useTouch = true;
+    stick.active = true;
+    stick.id = e.pointerId;
+    els.stick.setPointerCapture(e.pointerId);
+    setStickFromEvent(e);
+  });
+  els.stick.addEventListener("pointermove", e => {
+    if (!stick.active || e.pointerId !== stick.id) return;
+    setStickFromEvent(e);
+  });
+  function endStick(e) {
+    if (e.pointerId !== stick.id) return;
+    resetStick();
+  }
+  els.stick.addEventListener("pointerup", endStick);
+  els.stick.addEventListener("pointercancel", endStick);
+
+  function bindHold(btn, on, off) {
+    const down = e => { e.preventDefault(); e.stopPropagation(); on(e); };
+    const up = e => { e.preventDefault(); e.stopPropagation(); off(e); };
+    btn.addEventListener("pointerdown", down);
+    btn.addEventListener("pointerup", up);
+    btn.addEventListener("pointercancel", up);
+    btn.addEventListener("pointerleave", e => { if (e.buttons) up(e); });
+  }
+
+  bindHold(els.btnAtk, () => { attackHeld = true; }, () => { attackHeld = false; });
+  els.btnDash.addEventListener("pointerdown", e => { e.preventDefault(); if (state === "play") playerDash(); });
+  els.btnSkill.addEventListener("pointerdown", e => { e.preventDefault(); if (state === "play") playerSkill(); });
+  els.btnUlt.addEventListener("pointerdown", e => { e.preventDefault(); if (state === "play") playerUlt(); });
+  els.btnJump.addEventListener("pointerdown", e => { e.preventDefault(); if (state === "play") playerJump(); });
+  els.pauseBtn.addEventListener("click", e => { e.stopPropagation(); togglePause(); });
+
+  addEventListener("keydown", e => {
+    keys[e.key.toLowerCase()] = true;
+    if (e.key === "Escape") togglePause();
     if (state !== "play") return;
     if (e.key.toLowerCase() === "q") playerSkill();
     if (e.key.toLowerCase() === "f") playerUlt();
@@ -998,17 +1142,40 @@
     if (e.key === "Shift") playerDash();
   });
   addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
-  addEventListener("mousemove", e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+  addEventListener("mousemove", e => {
+    const p = clientPoint(e);
+    mouse.x = p.x; mouse.y = p.y;
+  });
+  canvas.addEventListener("pointerdown", e => {
+    if (e.button !== 0 && e.pointerType !== "touch") return;
+    const p = clientPoint(e);
+    mouse.x = p.x; mouse.y = p.y;
+    mouse.down = true;
+    mouse.fromCanvas = true;
+    if (e.pointerType === "touch") useTouch = true;
+  });
+  addEventListener("pointerup", e => {
+    if (e.button === 0 || e.pointerType === "touch") {
+      mouse.down = false;
+      mouse.fromCanvas = false;
+    }
+  });
   addEventListener("mousedown", e => {
-    if (e.button === 0) mouse.down = true;
     if (e.button === 2) { mouse.right = true; if (state === "play") playerDash(); }
   });
   addEventListener("mouseup", e => {
-    if (e.button === 0) mouse.down = false;
     if (e.button === 2) mouse.right = false;
   });
   addEventListener("contextmenu", e => e.preventDefault());
   addEventListener("resize", resize);
+  if (visualViewport) {
+    visualViewport.addEventListener("resize", resize);
+    visualViewport.addEventListener("scroll", resize);
+  }
+  addEventListener("orientationchange", () => setTimeout(resize, 80));
+  addEventListener("touchmove", e => {
+    if (state === "play" || e.target === canvas) e.preventDefault();
+  }, { passive: false });
 
   function refreshContinue() {
     const meta = loadMeta();

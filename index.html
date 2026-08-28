@@ -2,7 +2,11 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#070405">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Nacht der Bestien</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -28,6 +32,7 @@
       <span id="hud-check">Speicherpunkt 1</span>
     </div>
     <div class="hud-right">
+      <button type="button" class="pause-fab" id="pause-btn" aria-label="Pause">II</button>
       <div class="skill" id="skill-chip">Q Fähigkeit</div>
       <div class="skill" id="dash-chip">Ausweichen</div>
       <div class="skill" id="ult-chip">F Ult</div>
@@ -36,6 +41,20 @@
 
   <div id="hint" class="hidden">
     WASD bewegen · Klick Angriff · Shift ausweichen · Q Fähigkeit · F Overdrive · Leertaste Sprung (Puma)
+  </div>
+
+  <div id="touch" class="hidden">
+    <div id="stick" class="stick" aria-label="Bewegung">
+      <div class="stick-ring"></div>
+      <div id="stick-knob" class="stick-knob"></div>
+    </div>
+    <div class="pad-actions">
+      <button type="button" id="btn-jump" class="pad-btn hidden">Sprung</button>
+      <button type="button" id="btn-dash" class="pad-btn">Dash</button>
+      <button type="button" id="btn-skill" class="pad-btn">Skill</button>
+      <button type="button" id="btn-ult" class="pad-btn gold">Ult</button>
+      <button type="button" id="btn-atk" class="pad-btn atk">Angriff</button>
+    </div>
   </div>
 
   <section id="menu" class="overlay">
