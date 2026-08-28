@@ -7,51 +7,101 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <main class="app">
-    <header>
-      <h1>🎮 Nacht der Bestien</h1>
-      <p class="subtitle">Überlebe 50 Level in einer Welt voller Monster.</p>
-    </header>
+  <canvas id="game"></canvas>
 
-    <section id="start-screen" class="panel">
+  <div id="vignette"></div>
+
+  <header id="hud" class="hidden">
+    <div class="hud-left">
+      <div class="bar-wrap">
+        <span id="hud-name">—</span>
+        <div class="bar hp"><i id="hp-fill"></i></div>
+      </div>
+      <div class="bar-wrap">
+        <span>Overdrive</span>
+        <div class="bar od"><i id="od-fill"></i></div>
+      </div>
+    </div>
+    <div class="hud-mid">
+      <strong id="hud-level">Level 1/50</strong>
+      <span id="hud-area">Die alte Stadt</span>
+      <span id="hud-check">Speicherpunkt 1</span>
+    </div>
+    <div class="hud-right">
+      <div class="skill" id="skill-chip">Q Fähigkeit</div>
+      <div class="skill" id="dash-chip">Ausweichen</div>
+      <div class="skill" id="ult-chip">F Ult</div>
+    </div>
+  </header>
+
+  <div id="hint" class="hidden">
+    WASD bewegen · Klick Angriff · Shift ausweichen · Q Fähigkeit · F Overdrive · Leertaste Sprung (Puma)
+  </div>
+
+  <section id="menu" class="overlay">
+    <div class="panel">
+      <p class="kicker">Isometrisches Action-RPG</p>
+      <h1>Nacht der Bestien</h1>
+      <p class="lead">Fünf Gebiete. Fünfzig Nächte. Drei Jäger. Ein letzter Thron.</p>
+
       <h2>Wähle deinen Charakter</h2>
       <div class="characters">
         <button class="character-card" data-character="youth">
           <h3>🎧 Jugendlicher</h3>
-          <p>Schnell, erkennt Geräusche, entwickelt Spezialfähigkeiten.</p>
+          <ul>
+            <li>Schnell, Fernkampf mit Schall</li>
+            <li>Kopfhörer orten Feinde im Nebel</li>
+            <li>Später: Echo, Frequenzbruch</li>
+          </ul>
         </button>
         <button class="character-card" data-character="puma">
           <h3>🐆 Puma mit Helm</h3>
-          <p>Beweglich, springt und klettert, später mit Spezialrüstung.</p>
+          <ul>
+            <li>Sprung, Klettern, extrem mobil</li>
+            <li>Helm-Designs je Gebiet</li>
+            <li>Später: Dämonenrüstung</li>
+          </ul>
         </button>
         <button class="character-card" data-character="werewolf">
           <h3>🐺 Werwolf</h3>
-          <p>Startet schwächer, wird pro Gebiet stärker, kann später Lebensraub.</p>
+          <ul>
+            <li>Startet schwach, wächst pro Gebiet</li>
+            <li>Neue Instinkt-Fähigkeiten</li>
+            <li>Lebenskraft-Raub erst spät</li>
+          </ul>
         </button>
       </div>
-      <button id="start-game" disabled>Spiel starten</button>
-    </section>
+      <div class="menu-actions">
+        <button id="start-game" disabled>Jagd beginnen</button>
+        <button id="continue-game" class="ghost hidden">Fortsetzen</button>
+      </div>
+      <p class="fine">Stirbst du, landest du am letzten Speicherpunkt — nicht am Anfang.</p>
+    </div>
+  </section>
 
-    <section id="game-screen" class="panel hidden">
-      <div class="hud">
-        <span id="hud-character"></span>
-        <span id="hud-level"></span>
-        <span id="hud-area"></span>
-        <span id="hud-hp"></span>
-      </div>
-      <div class="enemy-box">
-        <h2 id="enemy-name"></h2>
-        <p id="enemy-desc"></p>
-        <p id="enemy-stats"></p>
-      </div>
-      <div class="actions">
-        <button id="attack-btn">Angreifen</button>
-        <button id="skill-btn">Fähigkeit einsetzen</button>
-        <button id="heal-btn">Fokus sammeln</button>
-      </div>
-      <div id="log" class="log"></div>
-    </section>
-  </main>
+  <section id="pause" class="overlay hidden">
+    <div class="panel slim">
+      <h2>Pause</h2>
+      <button id="resume-btn">Weiterkämpfen</button>
+      <button id="to-menu" class="ghost">Zum Menü</button>
+    </div>
+  </section>
+
+  <section id="dead" class="overlay hidden">
+    <div class="panel slim">
+      <h2>Du wurdest zerrissen</h2>
+      <p id="dead-text">Rückkehr zum Speicherpunkt.</p>
+      <button id="respawn-btn">Am Speicherpunkt aufwachen</button>
+    </div>
+  </section>
+
+  <section id="win" class="overlay hidden">
+    <div class="panel slim">
+      <h2>Das letzte Reich fällt</h2>
+      <p>Der große Endgegner ist besiegt. Die Nacht der Bestien endet.</p>
+      <button id="win-menu">Zurück ins Menü</button>
+    </div>
+  </section>
 
   <script src="script.js"></script>
 </body>
